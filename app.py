@@ -7,6 +7,8 @@ from utils.synthesis import run_synthesis, get_project_list,display_results
 from utils.rtl_metrics import analyze_verilog_file, visualize_rtl_metrics
 from utils.ide_environment import ide_environment_ui
 from utils.homepage import homepage_ui
+from oneStepSolution import one_step_input_fields
+
 
 import os
 
@@ -14,7 +16,7 @@ import os
 st.set_page_config(page_title="RTL Project Manager", layout="wide")
 
 # Navbar for navigation
-menu = ["Homepage","Folder Structure Generation", "Folder Setup", "Code Generation", "Linting", "Synthesis", "RTL Metrics Analyzer", "AI Error Fixer", "IDE", "AI Constraint File Generator"]
+menu = ["Homepage","Folder Structure Generation", "Folder Setup", "Code Generation", "Linting", "Synthesis", "RTL Metrics Analyzer", "AI Error Fixer", "IDE", "AI Constraint File Generator", "One-Step Solution"]
 choice = st.sidebar.selectbox("Navigation", menu)
 
 if choice == "Homepage":
@@ -148,3 +150,6 @@ elif choice == "IDE":
 elif choice == "AI Constraint File Generator":
     from utils.sdc_generator import sdc_ui
     sdc_ui()
+
+elif choice == "One-Step Solution":
+    base_path, project_description = one_step_input_fields()
