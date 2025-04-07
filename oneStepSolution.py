@@ -4,6 +4,7 @@ from utils.folder_setup import create_folders
 from utils.code_generator import generate_code, get_db_connection
 from utils.linting import run_linting
 from utils.ai_error_fixer import lint_verilog_file, fix_errors_with_gemini
+from utils.synthesis import run_synthesis, display_results
 import json
 import os
 
@@ -41,7 +42,6 @@ def save_structure_to_db(project_name, structure):
     conn.close()
 
 def perform_linting_and_fix(project_name, base_path):
-    """Lint Verilog files in the 'src' folder and auto-fix errors using Gemini (max 5 iterations)."""
     src_path = os.path.join(base_path, "src")
     if not os.path.exists(src_path):
         st.error("❌ 'src' folder not found in the given path.")
@@ -94,6 +94,12 @@ def perform_linting_and_fix(project_name, base_path):
                 st.error(f"❌ Errors still exist in {os.path.basename(file_path)} after 5 attempts.")
                 st.code(final_errors, language="plaintext")
 
+def perform_synthesis(project_name, base_path):
+    st.subheader("🔧 RTL Synthesis")
+    with st.spinner("🏗 Running Yosys and Netlistsvg synthesis..."):
+        success_files, error_logs = run_synthesis(base_path, project_name)
+        display_results(success_files, error_logs)
+
 def generate_and_display_structure(base_path, project_description):
     if base_path.strip() and project_description.strip():
         structure_str = generate_rtl_structure(project_description)
@@ -113,6 +119,7 @@ def generate_and_display_structure(base_path, project_description):
                 st.success(result)
 
             perform_linting_and_fix(project_name, created_path)
+            perform_synthesis(project_name, created_path)
 
         except Exception as e:
             st.error(f"❌ Failed to create folder structure: {str(e)}")
