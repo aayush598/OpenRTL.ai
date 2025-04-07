@@ -3,7 +3,7 @@ from utils.folder_structure_generation import generate_rtl_structure
 from utils.folder_setup import create_folders
 from utils.code_generator import generate_code, get_db_connection
 from utils.linting import run_linting
-from utils.ai_error_fixer import fix_errors_with_gemini, lint_verilog_file
+from utils.ai_error_fixer import lint_verilog_file, fix_errors_with_gemini
 import json
 import os
 
@@ -14,7 +14,7 @@ def display_folder_structure_ui(structure):
     directories = structure.get("directories", [])
 
     def render_directory(directory, indent=0):
-        prefix = " " * indent + "📁"  # Unicode em-space for indentation
+        prefix = " " * indent + "📁"
         with st.expander(f"{prefix} {directory['name']}", expanded=False):
             if directory["files"]:
                 st.markdown(f"{' ' * (indent+1)}📄 Files:")
@@ -40,39 +40,59 @@ def save_structure_to_db(project_name, structure):
     conn.commit()
     conn.close()
 
-def perform_linting(project_name, folder_path):
+def perform_linting_and_fix(project_name, base_path):
+    """Lint Verilog files in the 'src' folder and auto-fix errors using Gemini (max 5 iterations)."""
+    src_path = os.path.join(base_path, "src")
+    if not os.path.exists(src_path):
+        st.error("❌ 'src' folder not found in the given path.")
+        return
+
+    st.spinner("🔍 Running Verilator linting...")
+    all_files = []
+    for root, _, files in os.walk(src_path):
+        for file in files:
+            if file.endswith((".v", ".sv")):
+                all_files.append(os.path.join(root, file))
+
+    if not all_files:
+        st.warning("⚠ No Verilog files found in the 'src' folder.")
+        return
+
     st.subheader("🧪 Linting & Auto-Fix Results")
-    for root, _, files in os.walk(folder_path):
-        for file_name in files:
-            if file_name.endswith((".v", ".sv")):
-                file_path = os.path.join(root, file_name)
-                with open(file_path, "r") as f:
-                    code = f.read()
+    for file_path in all_files:
+        iteration = 0
+        with open(file_path, "r") as f:
+            code = f.read()
 
-                for attempt in range(1, 6):  # 5 attempts max
-                    lint_output = lint_verilog_file(file_path)
+        while iteration < 5:
+            lint_output = lint_verilog_file(file_path)
 
-                    if not lint_output:
-                        st.success(f"✅ {file_name} is clean (after {attempt} attempt(s))")
-                        break
-                    else:
-                        if attempt == 1:
-                            st.warning(f"⚠ Issues in {file_name} — Attempting auto-fix with Gemini")
+            if not lint_output:
+                st.success(f"✅ No issues in {os.path.basename(file_path)} (after {iteration} fix(es))")
+                break
+            else:
+                if iteration == 0:
+                    st.warning(f"⚠ Initial issues in {os.path.basename(file_path)}")
+                    st.code(lint_output, language="plaintext")
 
-                        fixed_code = fix_errors_with_gemini(code, lint_output)
+                st.info(f"🤖 Attempting Gemini fix: Iteration {iteration + 1}")
+                fixed_code = fix_errors_with_gemini(code, lint_output)
 
-                        if fixed_code.startswith("Gemini error:"):
-                            st.error(f"❌ Gemini failed: {fixed_code}")
-                            break
+                if fixed_code.startswith("Gemini error:"):
+                    st.error(f"❌ Gemini failed: {fixed_code}")
+                    break
 
-                        with open(file_path, "w") as f:
-                            f.write(fixed_code)
-                        code = fixed_code  # update code for next iteration
-                else:
-                    # All 5 attempts failed
-                    final_output = lint_verilog_file(file_path)
-                    st.error(f"❌ {file_name} still has issues after 5 fixes:")
-                    st.code(final_output, language="verilog")
+                with open(file_path, "w") as f:
+                    f.write(fixed_code)
+
+                code = fixed_code
+                iteration += 1
+
+        if iteration == 5:
+            final_errors = lint_verilog_file(file_path)
+            if final_errors:
+                st.error(f"❌ Errors still exist in {os.path.basename(file_path)} after 5 attempts.")
+                st.code(final_errors, language="plaintext")
 
 def generate_and_display_structure(base_path, project_description):
     if base_path.strip() and project_description.strip():
@@ -92,7 +112,7 @@ def generate_and_display_structure(base_path, project_description):
                 result = generate_code(project_name, created_path)
                 st.success(result)
 
-            perform_linting(project_name, created_path)
+            perform_linting_and_fix(project_name, created_path)
 
         except Exception as e:
             st.error(f"❌ Failed to create folder structure: {str(e)}")
