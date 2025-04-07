@@ -6,6 +6,7 @@ from utils.linting import run_linting
 from utils.ai_error_fixer import lint_verilog_file, fix_errors_with_gemini
 from utils.synthesis import run_synthesis, display_results
 from utils.rtl_metrics import analyze_verilog_file, visualize_rtl_metrics
+from utils.sdc_generator import extract_ports_and_clocks, generate_sdc_using_gemini, save_sdc_file  # 🔥 NEW
 import json
 import os
 
@@ -103,7 +104,6 @@ def perform_synthesis(project_name, base_path):
 
 def perform_rtl_metrics_analysis(project_name, base_path):
     st.subheader("📊 RTL Metrics Analysis")
-    src_path = base_path + "/src" 
     src_path = f"{base_path}/{project_name}/src" 
     if not os.path.exists(src_path):
         st.error(f"❌ 'src' folder not found in the given path.")
@@ -127,6 +127,43 @@ def perform_rtl_metrics_analysis(project_name, base_path):
         except Exception as e:
             st.error(f"❌ Failed to analyze `{os.path.basename(vfile)}`: {e}")
 
+def generate_sdc_for_top_module(project_name, base_path):
+    st.subheader("⏱️ .SDC Constraint File Generation")
+    src_path = os.path.join(base_path, project_name, "src")
+    if not os.path.exists(src_path):
+        st.error("❌ 'src' folder not found.")
+        return
+
+    # Heuristic: assume first .v file as top module
+    top_file = None
+    for file in os.listdir(src_path):
+        if file.endswith(".v") or file.endswith(".sv"):
+            top_file = os.path.join(src_path, file)
+            break
+
+    if not top_file:
+        st.warning("⚠ No Verilog file found to generate .SDC.")
+        return
+
+    try:
+        with open(top_file, "r") as f:
+            top_code = f.read()
+
+        ports, clocks = extract_ports_and_clocks(top_code)
+
+        with st.spinner("⚙ Generating .SDC using Gemini..."):
+            sdc_content = generate_sdc_using_gemini(top_code, ports, clocks)
+
+        sdc_file_name = os.path.splitext(os.path.basename(top_file))[0] + ".sdc"
+        sdc_path = save_sdc_file(sdc_content, sdc_file_name)
+
+        st.success(f"✅ .SDC file generated: `{sdc_path}`")
+        st.download_button("📥 Download .SDC File", sdc_content, file_name=sdc_file_name)
+        st.code(sdc_content, language="tcl")
+
+    except Exception as e:
+        st.error(f"❌ Failed to generate .SDC file: {e}")
+
 def generate_and_display_structure(base_path, project_description):
     if base_path.strip() and project_description.strip():
         structure_str = generate_rtl_structure(project_description)
@@ -148,7 +185,7 @@ def generate_and_display_structure(base_path, project_description):
             perform_linting_and_fix(project_name, created_path)
             perform_synthesis(project_name, created_path)
             perform_rtl_metrics_analysis(project_name, base_path)
-
+            generate_sdc_for_top_module(project_name, base_path)  # 🔥 .SDC Integration
 
         except Exception as e:
             st.error(f"❌ Failed to create folder structure: {str(e)}")
