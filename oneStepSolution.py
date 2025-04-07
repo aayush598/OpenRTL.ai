@@ -5,6 +5,7 @@ from utils.code_generator import generate_code, get_db_connection
 from utils.linting import run_linting
 from utils.ai_error_fixer import lint_verilog_file, fix_errors_with_gemini
 from utils.synthesis import run_synthesis, display_results
+from utils.rtl_metrics import analyze_verilog_file, visualize_rtl_metrics
 import json
 import os
 
@@ -100,6 +101,32 @@ def perform_synthesis(project_name, base_path):
         success_files, error_logs = run_synthesis(base_path, project_name)
         display_results(success_files, error_logs)
 
+def perform_rtl_metrics_analysis(project_name, base_path):
+    st.subheader("📊 RTL Metrics Analysis")
+    src_path = base_path + "/src" 
+    src_path = f"{base_path}/{project_name}/src" 
+    if not os.path.exists(src_path):
+        st.error(f"❌ 'src' folder not found in the given path.")
+        return
+
+    verilog_files = []
+    for root, _, files in os.walk(src_path):
+        for file in files:
+            if file.endswith((".v", ".sv")):
+                verilog_files.append(os.path.join(root, file))
+
+    if not verilog_files:
+        st.warning("⚠ No Verilog files found for RTL metrics analysis.")
+        return
+
+    for vfile in verilog_files:
+        st.markdown("---")
+        try:
+            metrics, hierarchy = analyze_verilog_file(vfile)
+            visualize_rtl_metrics(os.path.basename(vfile), metrics, hierarchy)
+        except Exception as e:
+            st.error(f"❌ Failed to analyze `{os.path.basename(vfile)}`: {e}")
+
 def generate_and_display_structure(base_path, project_description):
     if base_path.strip() and project_description.strip():
         structure_str = generate_rtl_structure(project_description)
@@ -120,6 +147,8 @@ def generate_and_display_structure(base_path, project_description):
 
             perform_linting_and_fix(project_name, created_path)
             perform_synthesis(project_name, created_path)
+            perform_rtl_metrics_analysis(project_name, base_path)
+
 
         except Exception as e:
             st.error(f"❌ Failed to create folder structure: {str(e)}")
