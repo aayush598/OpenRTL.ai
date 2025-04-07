@@ -2,6 +2,7 @@ import streamlit as st
 from utils.folder_structure_generation import generate_rtl_structure
 from utils.folder_setup import create_folders
 from utils.code_generator import generate_code, get_db_connection
+from utils.linting import run_linting
 import json
 
 def display_folder_structure_ui(structure):
@@ -38,6 +39,22 @@ def save_structure_to_db(project_name, structure):
     conn.commit()
     conn.close()
 
+def perform_linting(project_name, folder_path):
+    """Run Verilog linting using Verilator and display results."""
+    with st.spinner("🔍 Running Verilator linting..."):
+        results = run_linting(project_name, folder_path)
+
+        if isinstance(results, str):
+            st.error(results)
+        else:
+            st.subheader("🧪 Linting Results")
+            for file_name, lint_output in results:
+                if lint_output:
+                    st.error(f"⚠ Issues in {file_name}")
+                    st.code(lint_output, language="plaintext")
+                else:
+                    st.success(f"✅ No issues in {file_name}")
+
 def generate_and_display_structure(base_path, project_description):
     """Generates RTL folder structure and displays it."""
     if base_path.strip() and project_description.strip():
@@ -59,6 +76,9 @@ def generate_and_display_structure(base_path, project_description):
             with st.spinner("🤖 Generating Verilog code using Gemini..."):
                 result = generate_code(project_name, created_path)
                 st.success(result)
+            
+            # Run linting on generated Verilog files
+            perform_linting(project_name, created_path)
 
         except Exception as e:
             st.error(f"❌ Failed to create folder structure: {str(e)}")
