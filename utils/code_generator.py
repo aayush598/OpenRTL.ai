@@ -49,6 +49,7 @@ def generate_code_for_file(project_name, project_description, folder_structure, 
     Provide the full code without explanations or additional text.
     Only provide the code for the file path which is mentioned.
     Do not include the code which will be mentioned in the other files.
+    Generate code for only verilog not system verilog or other languages.
     '''
     
     response = client.models.generate_content(model="gemini-2.0-flash-lite", contents=prompt)
