@@ -3,7 +3,9 @@ from utils.folder_structure_generation import generate_rtl_structure
 from utils.folder_setup import create_folders
 from utils.code_generator import generate_code, get_db_connection
 from utils.linting import run_linting
+from utils.ai_error_fixer import fix_errors_with_gemini, lint_verilog_file
 import json
+import os
 
 def display_folder_structure_ui(structure):
     st.subheader("📂 Folder Structure Overview")
@@ -22,7 +24,7 @@ def display_folder_structure_ui(structure):
             if directory["subdirectories"]:
                 st.markdown(f"{' ' * (indent+1)}📂 Subdirectories:")
                 for subdir in directory["subdirectories"]:
-                    render_directory(subdir, indent=indent+2)  # Call recursively but avoid nested expanders
+                    render_directory(subdir, indent=indent+2)
 
     for directory in directories:
         render_directory(directory, indent=0)
@@ -31,7 +33,6 @@ def display_folder_structure_ui(structure):
     st.json(structure.get("metadata", {}))
 
 def save_structure_to_db(project_name, structure):
-    """Save the generated folder structure to the database."""
     conn = get_db_connection()
     c = conn.cursor()
     c.execute("INSERT OR REPLACE INTO folder_structures (project_name, folder_structure) VALUES (?, ?)",
@@ -40,44 +41,57 @@ def save_structure_to_db(project_name, structure):
     conn.close()
 
 def perform_linting(project_name, folder_path):
-    """Run Verilog linting using Verilator and display results."""
-    with st.spinner("🔍 Running Verilator linting..."):
-        results = run_linting(project_name, folder_path)
+    st.subheader("🧪 Linting & Auto-Fix Results")
+    for root, _, files in os.walk(folder_path):
+        for file_name in files:
+            if file_name.endswith((".v", ".sv")):
+                file_path = os.path.join(root, file_name)
+                with open(file_path, "r") as f:
+                    code = f.read()
 
-        if isinstance(results, str):
-            st.error(results)
-        else:
-            st.subheader("🧪 Linting Results")
-            for file_name, lint_output in results:
-                if lint_output:
-                    st.error(f"⚠ Issues in {file_name}")
-                    st.code(lint_output, language="plaintext")
+                for attempt in range(1, 6):  # 5 attempts max
+                    lint_output = lint_verilog_file(file_path)
+
+                    if not lint_output:
+                        st.success(f"✅ {file_name} is clean (after {attempt} attempt(s))")
+                        break
+                    else:
+                        if attempt == 1:
+                            st.warning(f"⚠ Issues in {file_name} — Attempting auto-fix with Gemini")
+
+                        fixed_code = fix_errors_with_gemini(code, lint_output)
+
+                        if fixed_code.startswith("Gemini error:"):
+                            st.error(f"❌ Gemini failed: {fixed_code}")
+                            break
+
+                        with open(file_path, "w") as f:
+                            f.write(fixed_code)
+                        code = fixed_code  # update code for next iteration
                 else:
-                    st.success(f"✅ No issues in {file_name}")
+                    # All 5 attempts failed
+                    final_output = lint_verilog_file(file_path)
+                    st.error(f"❌ {file_name} still has issues after 5 fixes:")
+                    st.code(final_output, language="verilog")
 
 def generate_and_display_structure(base_path, project_description):
-    """Generates RTL folder structure and displays it."""
     if base_path.strip() and project_description.strip():
         structure_str = generate_rtl_structure(project_description)
         structure = json.loads(structure_str)
         project_name = structure["project_name"]
         st.success("✅ Folder structure generated successfully!")
 
-        # Automatically create the folder structure in the specified location
         try:
             created_path = create_folders(base_path, structure)
             st.success(f"📁 Folder structure created at: `{created_path}`")
 
-            # Save to DB
             save_structure_to_db(project_name, structure)
             st.success("💾 Folder structure saved to the database!")
 
-            # Generate code using Gemini
             with st.spinner("🤖 Generating Verilog code using Gemini..."):
                 result = generate_code(project_name, created_path)
                 st.success(result)
-            
-            # Run linting on generated Verilog files
+
             perform_linting(project_name, created_path)
 
         except Exception as e:
