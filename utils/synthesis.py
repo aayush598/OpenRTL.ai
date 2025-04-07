@@ -36,32 +36,44 @@ def find_verilog_files(folder_structure, root_path):
     return verilog_files
 
 def run_synthesis(folder_path, project_name):
-    """Run synthesis using Yosys for all Verilog files, continue on errors."""
+    """Run synthesis using Yosys for Verilog files in the 'src' folder only."""
+    src_folder = os.path.join(folder_path, "src")
     output_folder = os.path.join(folder_path, "synthesized_images")
     os.makedirs(output_folder, exist_ok=True)
-    
+
+    if not os.path.exists(src_folder):
+        return [], {"src_folder_missing": "❌ 'src' folder not found in project."}
+
     folder_structure = get_folder_structure(project_name)
     if not folder_structure:
-        return "No folder structure found."
-    
-    verilog_files = find_verilog_files(folder_structure, folder_path)
+        return [], {"structure_missing": "❌ Folder structure not found in DB."}
+
+    # ONLY scan src folder
+    verilog_files = []
+    for root, _, files in os.walk(src_folder):
+        for file in files:
+            if file.endswith(".v") or file.endswith(".sv"):
+                file_path = os.path.join(root, file)
+                verilog_files.append(file_path)
+
     if not verilog_files:
-        return "No Verilog files found for synthesis."
+        return [], {"no_verilog": "⚠ No Verilog files found in 'src' folder for synthesis."}
 
     error_logs = {}
     success_files = []
 
     for vfile in verilog_files:
         base_name = os.path.splitext(os.path.basename(vfile))[0]
-        output_image = os.path.join(output_folder, f"{base_name}.svg")  # Netlistsvg outputs SVG
+        output_json = os.path.join(output_folder, f"{base_name}.json")
+        output_image = os.path.join(output_folder, f"{base_name}.svg")
 
         yosys_script = f"""
         read_verilog {vfile}
         synth -top {base_name}
-        write_json {output_folder}/{base_name}.json
+        write_json {output_json}
         """
 
-        script_path = os.path.join(folder_path, "synthesis.ys")
+        script_path = os.path.join(output_folder, f"synth_{base_name}.ys")
         with open(script_path, "w") as f:
             f.write(yosys_script)
 
@@ -69,11 +81,10 @@ def run_synthesis(folder_path, project_name):
 
         if result.returncode != 0:
             error_logs[base_name] = result.stderr
-            continue  # Skip to the next file
+            continue
 
-        # Generate SVG using Netlistsvg
-        netlistsvg_command = f"netlistsvg {output_folder}/{base_name}.json -o {output_image}"
-        netlist_result = subprocess.run(netlistsvg_command.split(), capture_output=True, text=True)
+        netlistsvg_cmd = f"netlistsvg {output_json} -o {output_image}"
+        netlist_result = subprocess.run(netlistsvg_cmd.split(), capture_output=True, text=True)
 
         if netlist_result.returncode == 0:
             success_files.append(output_image)
