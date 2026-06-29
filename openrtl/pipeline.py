@@ -18,7 +18,6 @@ from pathlib import Path
 from openrtl.agents import (
     content_agent,
     lint_engineer_agent,
-    metrics_analyst_agent,
     sdc_agent,
 )
 from openrtl.config import config
@@ -285,15 +284,25 @@ class FPGAPipeline:
     def step_metrics(self, project_name: str) -> str:
         log.info("Step 7/%d: RTL quality analysis", self.STEPS)
         src_path = f"{project_name}/src/counter.v"
+        src_code = self._fs.read_file(src_path)
 
-        metrics_json = self._fs.analyze_metrics(src_path)
-        response = metrics_analyst_agent.run(
-            f"Analyze these RTL metrics and provide a quality report:\n"
-            f"{json.dumps(metrics_json, indent=2)}\n"
-            f"Rate the design quality (0-100) and suggest improvements."
-        )
+        metrics_data = self._fs.analyze_metrics(src_path)
 
-        report = getattr(response, "content", str(response))
+        if isinstance(metrics_data, dict) and "error" in metrics_data and "pyverilog" in str(metrics_data["error"]):
+            report = (
+                f"RTL Metrics: pyverilog not installed (pip install pyverilog).\n\n"
+                f"File: {src_path}\nSize: {len(src_code)} chars\nLines: {src_code.count(chr(10)) + 1}\n\n"
+                f"Code:\n```verilog\n{src_code}\n```"
+            )
+        else:
+            response = content_agent.run(
+                f"Analyze these RTL metrics and provide a quality report:\n"
+                f"{json.dumps(metrics_data, indent=2)}\n\n"
+                f"RTL code:\n```verilog\n{src_code}\n```\n\n"
+                f"Rate the design quality (0-100) and suggest improvements."
+            )
+            report = getattr(response, "content", str(response))
+
         self._result.artifacts["metrics"] = report
         return report[:500]
 

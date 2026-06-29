@@ -154,10 +154,10 @@ class FileSystemService:
         clocks: set[str] = set()
 
         for match in re.finditer(
-            r"(input|output|inout)\s+(\[.*?\]\s+)?([a-zA-Z_][a-zA-Z0-9_]*)",
+            r"(input|output|inout)\s+(?:(?:wire|reg|logic)\s+)?(?:\[.*?\]\s+)?([a-zA-Z_][a-zA-Z0-9_]*)",
             code,
         ):
-            ports.add(match.group(3))
+            ports.add(match.group(2))
 
         for match in re.finditer(r"(?:input|wire|reg)\s+.*?(clk|clock)\b", code, re.IGNORECASE):
             clocks.add(match.group(1))

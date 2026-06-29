@@ -1,194 +1,207 @@
-import streamlit as st
-import json
+"""Streamlit frontend for OpenRTL.ai.
 
-st.set_page_config(
-    page_title="OpenRTL.ai - AI FPGA Development Agent",
-    page_icon="",
-    layout="wide",
-)
+Run with:  streamlit run openrtl/streamlit_app.py
+"""
+
+import json
+import os
+from pathlib import Path
+
+import streamlit as st
 
 from openrtl.config import config
-from openrtl.team import fpga_team, run_fpga_team
-from openrtl.knowledge import initialize_fpga_knowledge
-from openrtl.tools import (
-    list_projects_from_db,
-    get_project_from_db,
-    run_verilator_lint,
-    analyze_rtl_metrics,
-    run_yosys_synthesis,
-    read_file_content,
+from openrtl.pipeline import FPGAPipeline
+from openrtl.services.database import DatabaseService
+from openrtl.services.filesystem import FileSystemService
+
+st.set_page_config(
+    page_title="OpenRTL.ai - FPGA Development Pipeline",
+    page_icon="⚡",
+    layout="wide",
 )
 
 
 def main():
-    st.title("OpenRTL.ai - AI FPGA Development Agent")
+    st.title("⚡ OpenRTL.ai")
+    st.caption("FPGA development pipeline from natural-language descriptions")
 
     if not config.nvidia_api_key:
-        st.error("NVIDIA_API_KEY environment variable not set.")
-        st.info("Set it in your environment or create a .env file:")
-        st.code("NVIDIA_API_KEY='your-key-here'")
+        st.error("NVIDIA_API_KEY not set. Add it to your `.env` file.")
+        st.code("NVIDIA_API_KEY='nvapi-your-key-here'")
         return
 
-    initialize_fpga_knowledge()
-
     tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        " Develop FPGA Project",
-        " Lint & Fix",
-        " Synthesis",
-        " RTL Metrics",
-        " Projects",
+        "▶ Generate Project",
+        "📂 Saved Projects",
+        "🔍 Lint & Review",
+        "🔬 RTL Metrics",
+        "🧬 Synthesis",
     ])
 
+    # ── Tab 1: Generate ──────────────────────────────────────────────────
+
     with tab1:
-        col1, col2 = st.columns([2, 1])
+        st.subheader("Describe Your FPGA Project")
 
+        prompt = st.text_area(
+            "Project Description",
+            placeholder="e.g. 8-bit UART with configurable baud rate, TX, RX",
+            height=120,
+            key="gen_prompt",
+        )
+
+        col1, col2, col3 = st.columns([1, 1, 2])
         with col1:
-            st.subheader("Describe Your FPGA Project")
-            prompt = st.text_area(
-                "Project Description",
-                placeholder="e.g., Design a UART module with 8-bit data width, configurable baud rate, with transmitter and receiver. Include a testbench, SDC constraints, and run synthesis.",
-                height=150,
-            )
-
-            use_workflow = st.checkbox("Enable step-by-step workflow with human review", value=False)
-
-            if st.button(" Generate Project", type="primary", use_container_width=True):
-                if prompt.strip():
-                    with st.spinner("AI agents are designing your FPGA project..."):
-                        try:
-                            if use_workflow:
-                                from openrtl.workflow import fpga_workflow
-                                run_output = fpga_workflow.run(prompt)
-                                if run_output.is_paused:
-                                    st.warning("Workflow paused for human review.")
-                                    for req in run_output.steps_requiring_confirmation:
-                                        with st.expander(f"Review: {req.step_name}", expanded=True):
-                                            msg = req.confirmation_message or "Approve this step?"
-                                            st.info(msg)
-                                    stopped = st.warning("Workflow paused. Use CLI for interactive approval.")
-                                    st.json(run_output.model_dump() if hasattr(run_output, "model_dump") else {})
-                                else:
-                                    content = run_output.content if hasattr(run_output, "content") else str(run_output)
-                                    st.markdown(content)
-                            else:
-                                fpga_team.print_response(prompt, stream=True)
-                        except Exception as e:
-                            st.error(f"Error: {e}")
-                else:
-                    st.warning("Please enter a project description.")
-
+            run_btn = st.button("▶ Generate", type="primary", use_container_width=True)
         with col2:
-            st.subheader("Quick Examples")
+            show_code = st.checkbox("Show code", value=True)
+
+        if run_btn and prompt.strip():
+            with st.spinner("Running FPGA development pipeline..."):
+                try:
+                    pipeline = FPGAPipeline()
+                    result = pipeline.run_all(prompt.strip())
+                    st.success(f"Pipeline complete in {result.elapsed:.1f}s")
+
+                    for rel_path, content, size in result.files:
+                        if rel_path:
+                            full = Path(result.project_path) / rel_path
+                            with st.expander(f"📄 {rel_path} ({size} bytes)", expanded=show_code):
+                                if full.exists():
+                                    code = full.read_text()
+                                    lang = (
+                                        "verilog" if rel_path.endswith((".v", ".sv"))
+                                        else "tcl" if rel_path.endswith(".sdc")
+                                        else "plaintext"
+                                    )
+                                    st.code(code, language=lang)
+                                else:
+                                    st.info(f"{rel_path} — {size} bytes")
+
+                    if result.errors:
+                        st.warning(f"Steps with warnings: {len(result.errors)}")
+                        for e in result.errors:
+                            st.caption(f"⚠ {e[:200]}")
+
+                except Exception as e:
+                    st.error(f"Pipeline failed: {e}")
+
+        elif run_btn:
+            st.warning("Enter a project description.")
+
+        with st.expander("💡 Examples"):
             examples = [
-                "Design an 8-bit UART with configurable baud rate, TX, RX, and status registers. Include testbench.",
-                "Create a FIFO with configurable depth and data width, with full/empty flags.",
-                "Generate a SPI master-slave system with 4 modes and configurable clock divider.",
-                "Design a 32-bit RISC-V CPU with 5-stage pipeline, hazard detection, and forwarding.",
-                "Create a PWM generator with configurable duty cycle and frequency.",
-                "Design an AXI4-Stream FIFO with configurable depth.",
+                "8-bit counter with enable",
+                "UART transmitter with configurable baud rate",
+                "PWM generator with configurable duty cycle",
+                "SPI master-slave with 4 modes",
+                "AXI4-Stream FIFO with configurable depth",
             ]
             for ex in examples:
-                if st.button(f"  {ex[:60]}...", use_container_width=True):
-                    st.session_state["prompt"] = ex
+                if st.button(f"  {ex}", use_container_width=True, key=f"ex_{ex}"):
+                    st.session_state["gen_prompt"] = ex
                     st.rerun()
 
+    # ── Tab 2: Saved Projects ────────────────────────────────────────────
+
     with tab2:
-        st.subheader(" Run Verilator Lint & Auto-Fix")
-        col1, col2 = st.columns([3, 1])
-        with col1:
-            lint_path = st.text_input("Verilog File Path", key="lint_path")
-        with col2:
-            st.markdown("### ")
-            if st.button(" Run Lint", use_container_width=True):
-                if lint_path:
-                    result = run_verilator_lint(lint_path)
-                    if result:
-                        st.error("Lint Errors Found:")
-                        st.code(result, language="plaintext")
-                        from openrtl.agents import lint_engineer_agent
-                        with st.spinner("AI fixing errors..."):
-                            try:
-                                code = read_file_content(lint_path)
-                                fix_prompt = f"Fix the following Verilog file at {lint_path}. Current lint errors:\n\n{result}\n\nCurrent code:\n\n{code}"
-                                lint_engineer_agent.print_response(fix_prompt, stream=True)
-                            except Exception as e:
-                                st.error(f"Fix failed: {e}")
-                    else:
-                        st.success("No lint errors found!")
-                else:
-                    st.warning("Enter a file path.")
+        st.subheader("Saved Projects")
+        db = DatabaseService()
+        projects = db.list_projects()
+        if projects:
+            selected = st.selectbox("Select a project", projects, key="proj_select")
+            if selected:
+                data = db.get_project(selected)
+                if data:
+                    st.json(data)
+                proj_path = config.projects_dir / selected
+                if proj_path.exists():
+                    st.markdown("**Generated files:**")
+                    for f in sorted(proj_path.rglob("*")):
+                        if f.is_file():
+                            rel = f.relative_to(proj_path)
+                            st.write(f"📄 `{rel}` ({f.stat().st_size} bytes)")
+                            if st.button(f"View {rel}", key=f"view_{rel}"):
+                                st.code(f.read_text(), language="verilog" if f.suffix in (".v", ".sv") else "plaintext")
+        else:
+            st.info("No projects found. Generate one in the Generate tab.")
+
+    # ── Tab 3: Lint ──────────────────────────────────────────────────────
 
     with tab3:
-        st.subheader(" Run Yosys Synthesis")
-        col1, col2 = st.columns([2, 1])
-        with col1:
-            synth_src = st.text_input("Source Directory", placeholder="/path/to/project/src", key="synth_dir")
-            synth_name = st.text_input("Project Name", placeholder="my_project", key="synth_name")
-        with col2:
-            st.markdown("### ")
-            if st.button(" Run Synthesis", use_container_width=True):
-                if synth_src and synth_name:
-                    with st.spinner("Running Yosys synthesis..."):
-                        result = json.loads(run_yosys_synthesis(synth_src, synth_name))
-                        success = result.get("success_files", [])
-                        errors = result.get("error_logs", {})
-                        if success:
-                            st.success(f"Synthesized {len(success)} modules")
-                            for img in success:
-                                if Path(img).exists():
-                                    st.image(img, caption=Path(img).stem)
-                        if errors:
-                            st.error("Errors:")
-                            for fname, err in errors.items():
-                                st.code(f"{fname}: {err[:200]}")
+        st.subheader("Verilator Lint")
+        fs = FileSystemService()
+        lint_path = st.text_input("File path (relative to projects dir, or absolute)", key="lint_path")
+
+        if st.button("🔍 Run Lint", use_container_width=True) and lint_path:
+            try:
+                out = fs.run_verilator_lint(lint_path)
+                if out:
+                    st.error("Lint issues found:")
+                    st.code(out, language="plaintext")
                 else:
-                    st.warning("Enter source directory and project name.")
+                    st.success("No lint errors!")
+            except Exception as e:
+                st.info(str(e))
+
+    # ── Tab 4: Metrics ───────────────────────────────────────────────────
 
     with tab4:
-        st.subheader(" Analyze RTL Metrics")
-        metrics_path = st.text_input("Verilog File Path", key="metrics_path")
-        if st.button(" Analyze", use_container_width=True):
-            if metrics_path:
-                with st.spinner("Analyzing RTL metrics..."):
-                    result = json.loads(analyze_rtl_metrics(metrics_path))
-                    if "error" in result:
-                        st.error(result["error"])
+        st.subheader("RTL Metrics Analysis")
+        fs = FileSystemService()
+        metrics_path = st.text_input("File path (relative to projects dir, or absolute)", key="metrics_path")
+
+        if st.button("📊 Analyze", use_container_width=True) and metrics_path:
+            try:
+                code = fs.read_file(metrics_path)
+                st.markdown(f"**File:** {metrics_path} ({len(code)} chars, {code.count(chr(10)) + 1} lines)")
+                result = fs.analyze_metrics(metrics_path)
+                if "error" in result:
+                    st.info(result["error"])
+                else:
+                    m = result["metrics"]
+                    cols = st.columns(4)
+                    cols[0].metric("Modules", m["modules"])
+                    cols[1].metric("Inputs", m["inputs"])
+                    cols[2].metric("Outputs", m["outputs"])
+                    cols[3].metric("Design Score", m["design_score"])
+                    cols2 = st.columns(4)
+                    cols2[0].metric("Wires", m["wires"])
+                    cols2[1].metric("Regs", m["regs"])
+                    cols2[2].metric("FSM Blocks", m["fsm_blocks"])
+                    cols2[3].metric("Always Blocks", m["always_blocks"])
+                    if m.get("unused_signals"):
+                        st.warning(f"Unused: {', '.join(m['unused_signals'])}")
                     else:
-                        m = result["metrics"]
-                        cols = st.columns(4)
-                        cols[0].metric("Modules", m["modules"])
-                        cols[1].metric("Inputs", m["inputs"])
-                        cols[2].metric("Outputs", m["outputs"])
-                        cols[3].metric("Design Score", m["design_score"])
-                        cols2 = st.columns(4)
-                        cols2[0].metric("Wires", m["wires"])
-                        cols2[1].metric("Regs", m["regs"])
-                        cols2[2].metric("FSM Blocks", m["fsm_blocks"])
-                        cols2[3].metric("Always Blocks", m["always_blocks"])
-                        if m.get("unused_signals"):
-                            st.warning(f"Unused Signals: {', '.join(m['unused_signals'])}")
-                        else:
-                            st.success("No unused signals")
-                        if result.get("module_hierarchy"):
-                            st.subheader("Module Hierarchy")
+                        st.success("No unused signals")
+                    if result.get("module_hierarchy"):
+                        with st.expander("Module Hierarchy"):
                             st.json(result["module_hierarchy"])
-            else:
-                st.warning("Enter a file path.")
+            except Exception as e:
+                st.info(str(e))
+
+    # ── Tab 5: Synthesis ─────────────────────────────────────────────────
 
     with tab5:
-        st.subheader(" Saved FPGA Projects")
-        projects = list_projects_from_db()
-        if projects and projects != "No projects found":
-            proj_list = [p.strip() for p in projects.split(",")]
-            selected = st.selectbox("Select Project", proj_list)
-            if selected:
-                data = get_project_from_db(selected)
-                try:
-                    st.json(json.loads(data))
-                except json.JSONDecodeError:
-                    st.code(data)
-        else:
-            st.info("No saved projects found. Generate one in the Develop tab.")
+        st.subheader("Yosys Synthesis")
+        fs = FileSystemService()
+        synth_proj = st.text_input("Project name", key="synth_proj", placeholder="e.g. 8_bit_counter")
+
+        if st.button("🧬 Run Synthesis", use_container_width=True) and synth_proj:
+            try:
+                result = fs.run_yosys_synthesis(synth_proj)
+                success = result.get("success_files", [])
+                errors = result.get("error_logs", {})
+                if success:
+                    st.success(f"Synthesized {len(success)} modules")
+                    for img in success:
+                        if Path(img).exists():
+                            st.image(img, caption=Path(img).stem)
+                if errors:
+                    for fname, err in errors.items():
+                        st.code(f"{fname}: {err[:300]}")
+            except Exception as e:
+                st.info(str(e))
 
 
 if __name__ == "__main__":

@@ -36,6 +36,7 @@ class DatabaseService:
             raise DatabaseError(f"Failed to connect to database: {e}") from e
 
     def save_project(self, project_name: str, structure: dict) -> None:
+        self._init_db()
         with self._connect() as conn:
             try:
                 conn.execute(
@@ -47,6 +48,7 @@ class DatabaseService:
                 raise DatabaseError(f"Failed to save project '{project_name}': {e}") from e
 
     def get_project(self, project_name: str) -> dict | None:
+        self._init_db()
         with self._connect() as conn:
             try:
                 row = conn.execute(
@@ -60,6 +62,7 @@ class DatabaseService:
                 raise DatabaseError(f"Failed to get project '{project_name}': {e}") from e
 
     def list_projects(self) -> list[str]:
+        self._init_db()
         with self._connect() as conn:
             try:
                 rows = conn.execute(
@@ -70,6 +73,7 @@ class DatabaseService:
                 raise DatabaseError(f"Failed to list projects: {e}") from e
 
     def delete_project(self, project_name: str) -> None:
+        self._init_db()
         with self._connect() as conn:
             try:
                 conn.execute(
